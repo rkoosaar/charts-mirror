@@ -1,0 +1,25 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["github>rkoosaar/renovate-config"],
+  customManagers: [
+    {
+      customType: "regex",
+      description: ["Process Chart versions"],
+      managerFilePatterns: ["/(^|/)metadata\\.ya?ml$/"],
+      matchStrings: [
+        "chartRegistry: (?<registryUrl>\\S+)\nchartName: (?<depName>\\S+)\nchartVersion: (?<currentValue>\\S+)",
+      ],
+      datasourceTemplate: "helm",
+    },
+  ],
+  packageRules: [
+    {
+      description: "Auto-merge Helm Charts",
+      matchDatasources: ["helm"],
+      automerge: true,
+      automergeType: "pr",
+      matchUpdateTypes: ["major", "minor", "patch"],
+      ignoreTests: false,
+    },
+  ],
+}

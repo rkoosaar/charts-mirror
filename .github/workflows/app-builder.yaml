@@ -1,0 +1,162 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Chart Builder
+
+on:
+  workflow_call:
+    inputs:
+      chartName:
+        type: string
+        description: Name of the Upstream Chart
+        required: true
+      chartVersion:
+        type: string
+        description: Version of the Upstream Chart
+        required: true
+      chartRegistry:
+        type: string
+        description: Registry of the Upstream Chart
+        required: true
+      artifactName:
+        type: string
+        description: Name of the Published Chart
+        required: true
+      release:
+        type: boolean
+        description: Release
+        required: true
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      app-exists: ${{ steps.app.outputs.exists }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Get Repository Name
+        id: repository
+        run: |
+          echo "name=${GITHUB_REPOSITORY#*/}" >> $GITHUB_OUTPUT
+
+      - name: Check For Exising Chart
+        uses: ./.github/actions/app-exists
+        id: app
+        with:
+          app: ${{ steps.repository.outputs.name }}/${{ inputs.artifactName }}
+
+  build:
+    name: Build (${{ inputs.chartVersion }})
+    runs-on: ubuntu-latest
+    needs: ["plan"]
+    steps:
+      - name: Install Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+
+      - if: ${{ inputs.release }}
+        name: Install Cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+        with:
+          cosign-release: v2.6.1 # TODO: remove after Flux 2.8 with support for cosign v3
+
+      - if: ${{ inputs.release }}
+        name: Login to GitHub Container Registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Add Helm Repository
+        run: |
+          helm repo add upstream ${{ inputs.chartRegistry }}
+
+      - name: Update Helm Repository
+        run: |
+          helm repo update upstream
+
+      - name: Pull Chart
+        run: |
+          helm pull upstream/${{ inputs.chartName }} --version ${{ inputs.chartVersion }} --untar --untardir ./src
+
+      - name: Override Chart Name
+        run: |
+          yq --inplace '.name = "${{ inputs.artifactName }}"' ./src/*/Chart.yaml
+
+      - name: Package Chart
+        run: |
+          mkdir -p dist
+          helm package ./src/* --version ${{ inputs.chartVersion }} --destination ./dist
+
+      - if: ${{ inputs.release }}
+        name: Push Chart
+        run: |
+          helm push ./dist/*.tgz oci://ghcr.io/${{ github.repository }}
+
+      - if: ${{ inputs.release }}
+        name: Sign artifacts with Cosign
+        run: |
+          cosign sign --yes ghcr.io/${{ github.repository }}/${{ inputs.artifactName }}:${{ inputs.chartVersion }}
+
+  release:
+    if: ${{ inputs.release && needs.plan.outputs.app-exists != 'true' }}
+    name: Release
+    needs: ["plan", "build"]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Get Repository Name
+        id: repository
+        run: |
+          echo "name=${GITHUB_REPOSITORY#*/}" >> $GITHUB_OUTPUT
+
+      - name: Generate Token
+        uses: actions/create-github-app-token@67018539274d69449ef7c02e8e71183d1719ab42 # v2.1.4
+        id: app-token
+        with:
+          app-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+
+      - name: Get Release Tag
+        uses: ./.github/actions/release-tag
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Create Release
+        uses: ncipollo/release-action@b7eabc95ff50cbeeedec83973935c8f306dfcd0b # v1.20.0
+        with:
+          body: |
+            > [!NOTE]
+            > A new chart has been added.
+
+            ## 📦 Chart
+
+            **Name**: [${{ inputs.artifactName }}](https://github.com/${{ github.repository }}/pkgs/container/${{ steps.repository.outputs.name }}%2F${{ inputs.artifactName }})
+          tag: ${{ steps.release.outputs.tag }}
+          token: ${{ steps.app-token.outputs.token }}
+
+  announce:
+    if: ${{ inputs.release && !cancelled() }}
+    needs: ["plan", "build", "release"]
+    name: Notify
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ contains(needs.*.result, 'failure') }}
+        name: Send Discord Webhook
+        uses: sarisia/actions-status-discord@11a0bfe3b50977e38aa2bd4a4ebd296415e83c19 # v1.15.4
+        with:
+          color: "0xFF0000"
+          description: |
+            Name: `${{ inputs.artifactName }}`
+            Version: `${{ inputs.chartVersion }}`
+            [Rebuild](${{ github.server_url }}/${{ github.repository }}/actions/workflows/release.yaml)
+          nodetail: true
+          title: Chart build failed
+          username: GitHub Actions
+          url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}

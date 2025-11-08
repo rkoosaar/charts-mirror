@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-06/schema#",
+  "id": "rtrox-containers/metadata",
+  "title": "Chart Metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "chartName": {
+      "type": "string",
+      "description": "Name of the Upstream Chart",
+      "pattern": "^[a-z0-9-]+$"
+    },
+    "chartVersion": {
+      "type": "string",
+      "description": "Version of the Upstream Chart"
+    },
+    "chartRegistry": {
+      "type": "string",
+      "description": "Registry of the Upstream Chart"
+    },
+    "artifactName": {
+      "type": "string",
+      "description": "Name of the Published Chart",
+      "pattern": "^[a-z0-9-]+$"
+    }
+  }
+}
