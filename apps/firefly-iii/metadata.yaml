@@ -1,5 +1,5 @@
 ---
 chartRegistry: https://firefly-iii.github.io/kubernetes
 chartName: firefly-iii
-chartVersion: 1.9.1
+chartVersion: 1.9.11
 artifactName: firefly-iii
