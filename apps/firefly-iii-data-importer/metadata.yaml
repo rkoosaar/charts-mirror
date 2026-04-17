@@ -1,5 +1,5 @@
 ---
 chartRegistry: https://firefly-iii.github.io/kubernetes
 chartName: importer
-chartVersion: 1.5.1
+chartVersion: 1.5.2
 artifactName: importer
